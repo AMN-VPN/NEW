@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اتاق‌های من | Globgram</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="rooms-container">
+        <div class="rooms-header">
+            <h2>اتاق‌های من</h2>
+            <button id="openProfileBtn" class="profile-button">
+                <span class="profile-icon">👤</span>
+                پروفایل کاربری
+            </button>
+            <button id="createNewRoom" class="primary-button">ایجاد اتاق جدید</button>
+        </div>
+        <div class="rooms-list" id="roomsList">
+            <!-- اتاق‌ها اینجا به صورت داینامیک اضافه می‌شوند -->
+        </div>
+    </div>
+
+    <div id="newRoomModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3>ایجاد اتاق جدید</h3>
+            <input type="text" id="roomNameInput" placeholder="نام اتاق را وارد کنید">
+            <button id="confirmCreateRoom" class="primary-button">ایجاد</button>
+            <button id="cancelCreateRoom" class="secondary-button">انصراف</button>
+        </div>
+    </div>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="src/profile-manager.js"></script>
+    <script src="src/settings-manager.js"></script>
+    <script src="src/rooms-manager.js"></script>
+</body>
+</html>
+<!-- صفحه خوش آمدگویی -->
+<div id="welcomeScreen" class="welcome-container">
+    <div class="welcome-content">
+        <h1>به برنامه Globgram خوش آمدید</h1>
+        <p>با این برنامه می‌توانید به راحتی با دوستان خود ارتباط صوتی برقرار کنید</p>
+        <div class="features">
+            <div class="feature-item">
+                <span class="icon">🎤</span>
+                <p>ضبط و ارسال پیام صوتی</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🔒</span>
+                <p>اتاق‌های خصوصی و امن</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🌐</span>
+                <p>ارتباط آنلاین و سریع</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🛡️</span>
+                <p>غیر قابل فیلتر شدن</p>
+            </div>
+        </div>
+        <button id="startButton" class="welcome-button">شروع برنامه</button>
+    </div>
+</div>
+
+<!-- پروفایل و تنظیمات -->
+<div id="profileSection" class="profile-container" style="display: none;">
+    <div class="profile-content">
+        <div class="profile-header">
+            <div class="profile-icon">👤</div>
+            <h2 id="profileName">نام کاربر</h2>
+            <p id="profileEmail">ایمیل کاربر</p>
+        </div>
+        
+        <div class="settings-container">
+            <div class="settings-section">
+                <div class="settings-item" id="accountSettings">
+                    <span class="settings-icon">🔐</span>
+                    <span class="settings-text">تنظیمات حساب کاربری</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+                
+                <div class="settings-item" id="chatSettings">
+                    <span class="settings-icon">💬</span>
+                    <span class="settings-text">تنظیمات چت و پیام‌ها</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+
+                <div class="settings-item" id="privacySettings">
+                    <span class="settings-icon">🔒</span>
+                    <span class="settings-text">حریم خصوصی</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <button id="backToMainChat" class="primary-button back-to-chat">
+                    بازگشت به صفحه چت
+                </button>
+            </div>
+
+            <div class="settings-section">
+                <div class="settings-item" id="logoutButton">
+                    <span class="settings-icon">🚪</span>
+                    <span class="settings-text">خروج از حساب کاربری</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+  <!-- پنل تنظیمات حساب کاربری -->
+  <div class="settings-panels">
+      <div id="accountSettingsPanel" class="settings-panel" style="transform: translateX(100%);">
+          <div class="panel-header">
+              <button class="back-button" id="backToProfile">⮜</button>
+              <h3>تنظیمات حساب کاربری</h3>
+          </div>
+          <div class="panel-content">
+              <div class="profile-avatar-section">
+                  <img id="profileAvatar" src="" alt="تصویر پروفایل">
+                  <button id="changeAvatarBtn" class="avatar-upload-btn">تغییر تصویر</button>
+              </div>
+              <div class="setting-option">
+                  <label>نام کاربری</label>
+                  <input type="text" id="userNameInput" class="settings-input" placeholder="نام کاربری خود را وارد کنید">
+                  <button id="saveUserNameBtn" class="save-settings">ذخیره نام کاربری</button>
+              </div>
+          </div>
+      </div>
+  </div>

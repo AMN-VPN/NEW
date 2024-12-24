@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>اتاق چت | Globgram</title>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="src/voice-manager.js"></script>
+    <script src="src/room-manager.js"></script>
+    <script src="src/chat-room.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="room-header">
+                <div class="room-info">
+                    <div class="room-avatar-container">
+                        <img id="roomAvatar" src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIxMDAiIGN5PSIxMDAiIHI9IjEwMCIgZmlsbD0iI2UwZTBlMCIvPjxjaXJjbGUgY3g9IjEwMCIgY3k9IjgwIiByPSI0MCIgZmlsbD0iI2JkYmRiZCIvPjxwYXRoIGQ9Ik0xODAsMTgwYzAtNDQtNDAtODAtODAtODBzLTgwLDM2LTgwLDgwIiBmaWxsPSIjYmRiZGJkIi8+PC9zdmc+" alt="Room Avatar">
+                        <button id="changeRoomAvatarBtn" class="change-avatar-btn">📷</button>
+                    </div>
+                    <div class="room-text">
+                        <h2 id="roomName" class="editable-room-name">اتاق جدید</h2>
+                        <small>کد اتاق: <span id="roomCodeDisplay"></span></small>
+                    </div>
+                </div>
+                <div class="room-menu">
+                    <button class="menu-dots" id="menuButton">⋮</button>
+                    <div class="menu-popup" id="menuPopup">
+                        <button id="editRoomNameBtn">تغییر نام اتاق</button>
+                        <button id="deleteRoomBtn" class="delete-button">حذف اتاق</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="online-users" id="onlineUsers"></div>
+        <div class="chat-messages" id="recordings"></div>
+        <div class="chat-controls">
+            <button id="recordButton">شروع ضبط</button>
+            <button id="stopButton" disabled>توقف ضبط</button>
+            <button id="leaveRoom">خروج از اتاق</button>
+        </div>
+    </div>
+</body>
+</html>

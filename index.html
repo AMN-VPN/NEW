@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Globgram</title>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+    <script src="src/profile-manager.js"></script>
+    <script src="src/settings-manager.js"></script>
+
+</head>
+
+<body>
+    <div id="authContainer" class="auth-container">
+        <div class="auth-box">
+            <h2>ورود به برنامه</h2>
+            <input type="email" id="emailInput" placeholder="ایمیل خود را وارد کنید">
+            <button id="sendCodeBtn">دریافت کد تایید</button>
+            <div id="verifySection" style="display: none;">
+                <input type="text" id="verifyCode" placeholder="کد تایید را وارد کنید">
+                <button id="verifyBtn">تایید کد</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="header-controls">
+        <button id="openProfileBtn" class="profile-button">
+            <span class="profile-icon">👤</span>
+            پروفایل کاربری
+        </button>
+    </div>
+    <div class="container" id="mainContent" style="display: none;">
+        <h1>Globgram</h1>
+        <div id="userInfo"></div>
+        <div class="room-controls">
+            <button id="createRoom">ایجاد اتاق جدید</button>
+            <div id="roomCodeDisplay" style="display: none;">
+                <p>کد اتاق شما:</p>
+                <div id="roomCode"></div>
+            </div>
+            <div>
+                <input type="text" id="joinRoomInput" placeholder="کد اتاق را وارد کنید">
+                <button id="joinRoom">پیوستن به اتاق</button>
+    </div>
+</div>
+        <div id="recordings"></div>
+    </div>
+
+    <script>
+        // تنظیمات و ثابت‌ها
+        const CONFIG = {
+            EMAIL_KEY: "mIlm34r7HHZ0hsr3Z",
+            EMAIL_SERVICE: "service_l5atf6s",
+            EMAIL_TEMPLATE: "template_0ahwrci",
+            STUN_SERVERS: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        };
+        console.log('Application config loaded:', CONFIG);
+
+        // دیتابیس
+        const db = new Dexie('voiceApp');
+        console.log('Database instance created');
+
+        db.version(1).stores({
+            voices: '++id, voiceId, blob, timestamp, roomCode, userEmail',
+            users: '++id, email, verifyCode, verified'
+        });
+        console.log('Database schema initialized');
+
+        // 3. متغیرهای گلوبال
+        let mediaRecorder;
+        let audioChunks = [];
+        let currentUser = null;
+        let peer;
+        let connections = [];
+        let currentRoom = null;
+
+        // 4. توابع کمکی
+        const generateVoiceId = () => {
+            return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        };
+
+        const generateRoomCode = () => {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        };
+
+        const displayRecording = (audioUrl, isRemote, timestamp, voiceId, userEmail) => {
+            if (document.querySelector(`[data-voice-id="${voiceId}"]`)) {
+                return;
+            }
+
+            const recordingItem = document.createElement('div');
+            recordingItem.className = 'recording-item';
+            recordingItem.setAttribute('data-voice-id', voiceId);
+
+            const audio = document.createElement('audio');
+            audio.src = audioUrl;
+            audio.controls = true;
+
+            const info = document.createElement('div');
+            info.innerHTML = `
+                <p>${isRemote ? 'دریافتی از: ' : 'ضبط شده توسط: '}${userEmail}</p>
+                <small>${new Date(timestamp).toLocaleString('fa-IR')}</small>
+            `;
+
+            recordingItem.appendChild(audio);
+            recordingItem.appendChild(info);
+            document.getElementById('recordings').insertBefore(recordingItem, document.getElementById('recordings').firstChild);
+        };
+
+        // 5. توابع اتصال و مدیریت اتاق
+        const setupConnection = (conn) => {
+            connections.push(conn);
+ 
+            conn.on('open', async () => {
+                const voices = await db.voices
+                    .where('roomCode')
+                    .equals(currentRoom)
+                    .toArray();
+          
+                for (let voice of voices) {
+                    const arrayBuffer = await voice.blob.arrayBuffer();
+                    conn.send({
+                        type: 'audio',
+                        audioData: arrayBuffer,
+                        timestamp: voice.timestamp,
+                        voiceId: voice.voiceId,
+                        userEmail: currentUser.email
+                    });
+                }
+            });
+
+            conn.on('data', async (data) => {
+                if (data.type === 'audio') {
+                    const audioBlob = new Blob([data.audioData], { type: 'audio/webm' });
+                    const voiceId = generateVoiceId();
+          
+                    await db.voices.add({
+                        voiceId,
+                        blob: audioBlob,
+                        timestamp: data.timestamp,
+                        roomCode: currentRoom,
+                        userEmail: data.userEmail
+                    });
+
+                    displayRecording(
+                        URL.createObjectURL(audioBlob),
+                        true,
+                        data.timestamp,
+                        voiceId,
+                        data.userEmail
+                    );
+                }
+            });
+
+            peer.on('error', (error) => {
+                console.log('Peer connection error:', error);
+            });
+
+            conn.on('close', () => {
+                console.log('Connection closed:', conn.peer);
+                connections = connections.filter(c => c !== conn);
+            });
+        };
+
+        const initializePeer = (roomCode, isCreator = true) => {
+            const peerId = isCreator ? roomCode : `${roomCode}-${Math.random().toString(36).substr(2, 4)}`;
+  
+            peer = new Peer(peerId, {
+                debug: 2,
+                config: { iceServers: CONFIG.STUN_SERVERS }
+            });
+
+            peer.on('open', (id) => {
+                if (!isCreator) {
+                    const conn = peer.connect(roomCode);
+                    conn.on('open', () => {
+                        setupConnection(conn);
+                        alert('با موفقیت به اتاق متصل شدید');
+                    });
+                }
+            });
+
+            peer.on('connection', (conn) => {
+                setupConnection(conn);
+                alert('کاربر جدید به اتاق پیوست');
+            });
+        };
+
+        // 6. ماژول‌های اصلی
+        const VoiceRecorder = {
+            async startRecording() {
+                console.log('Starting voice recording');
+                if (!currentRoom) {
+                    console.log('No active room found');
+                    alert('لطفا ابتدا وارد یک اتاق شوید');
+                    return;
+                }
+        
+                try {
+                    console.log('Requesting microphone access');
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    console.log('Microphone access granted');
+                    mediaRecorder = new MediaRecorder(stream);
+            
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const timestamp = new Date().getTime();
+                        const voiceId = generateVoiceId();
+                
+                        await db.voices.add({
+                            voiceId,
+                            blob: audioBlob,
+                            timestamp,
+                            roomCode: currentRoom,
+                            userEmail: currentUser.email
+                        });
+
+                        displayRecording(
+                            URL.createObjectURL(audioBlob),
+                            false,
+                            timestamp,
+                            voiceId,
+                            currentUser.email
+                        );
+
+                        if (connections.length > 0) {
+                            const arrayBuffer = await audioBlob.arrayBuffer();
+                            connections.forEach(conn => {
+                                if (conn.open) {
+                                    conn.send({
+                                        type: 'audio',
+                                        audioData: arrayBuffer,
+                                        timestamp,
+                                        voiceId,
+                                        userEmail: currentUser.email
+                                    });
+                                }
+                            });
+                        }
+
+                        audioChunks = [];
+                    };
+
+                    mediaRecorder.onerror = (event) => {
+                        console.log('MediaRecorder error:', event);
+                    };
+
+                    mediaRecorder.onstart = () => {
+                        console.log('Recording started');
+                    };
+
+                    mediaRecorder.start();
+                    document.getElementById('recordButton').disabled = true;
+                    document.getElementById('stopButton').disabled = false;
+                } catch (error) {
+                    console.error('Microphone access failed:', error);
+                    alert('لطفا دسترسی میکروفون را فعال کنید');
+                }
+            },
+
+            stopRecording() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    document.getElementById('recordButton').disabled = false;
+                    document.getElementById('stopButton').disabled = true;
+                }
+            }
+        };
+          const RoomManager = {
+              init() {
+                  // بررسی وضعیت اتاق
+                  const currentRoomCode = localStorage.getItem('currentRoomCode');
+                  if (currentRoomCode) {
+                      document.getElementById('welcomeScreen').style.display = 'none';
+                      window.location.href = 'chat-room.html';
+                      return;
+                  }
+
+                  // دکمه ایجاد اتاق
+                  document.getElementById('createRoom').onclick = () => {
+                      const roomCode = generateRoomCode();
+                      localStorage.setItem('currentRoomCode', roomCode);
+                      document.getElementById('roomCode').textContent = roomCode;
+                      document.getElementById('roomCodeDisplay').style.display = 'block';
+                      window.location.href = 'chat-room.html';
+                  };
+
+                  // دکمه پیوستن به اتاق
+                  document.getElementById('joinRoom').onclick = () => {
+                      const roomCode = document.getElementById('joinRoomInput').value.trim();
+                      
+                      if (!roomCode || roomCode.length !== 6) {
+                          alert('لطفا یک کد 6 رقمی معتبر وارد کنید');
+                          return;
+                      }
+                      
+                      localStorage.setItem('currentRoomCode', roomCode);
+                      window.location.href = 'chat-room.html?join=true';
+                  };
+              }
+          };
+
+          // فراخوانی در زمان load صفحه
+          document.addEventListener('DOMContentLoaded', () => {
+              if (window.location.pathname.includes('chat-room.html')) {
+                  document.getElementById('welcomeScreen').style.display = 'none';
+              }
+              RoomManager.init();
+          });        const Auth = {
+            init() {
+                emailjs.init(CONFIG.EMAIL_KEY);
+                this.bindEvents();
+                this.checkExistingSession();
+            },
+
+            async sendVerificationCode() {
+                const email = document.getElementById('emailInput').value;
+                if (!email || !email.includes('@')) {
+                    alert('لطفا یک ایمیل معتبر وارد کنید');
+                    return;
+                }
+
+                const verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
+        
+                try {
+                    await emailjs.send(CONFIG.EMAIL_SERVICE, CONFIG.EMAIL_TEMPLATE, {
+                        to_email: email,
+                        verification_code: verifyCode,
+                        from_name: "Globgram"
+                    });
+
+                    await db.users.put({
+                        email: email,
+                        verifyCode: verifyCode,
+                        verified: false,
+                        timestamp: new Date().getTime()
+                    });
+
+                    document.getElementById('verifySection').style.display = 'block';
+                    alert('کد تایید به ایمیل شما ارسال شد');
+                } catch (error) {
+                    console.error('خطا در ارسال:', error);
+                    alert('خطا در ارسال کد. لطفا دوباره تلاش کنید.');
+                }
+            },
+
+            async verifyCode() {
+                const email = document.getElementById('emailInput').value;
+                const code = document.getElementById('verifyCode').value;
+        
+                try {
+                    const user = await db.users
+                        .where('email')
+                        .equals(email)
+                        .reverse()
+                        .first();
+            
+                    if (user && user.verifyCode === code) {
+                        await db.users.where('email').equals(email).modify({ verified: true });
+                        localStorage.setItem('userEmail', email);
+                        currentUser = user;
+                        this.showMainContent();
+                    } else {
+                        alert('کد وارد شده صحیح نیست');
+                    }
+                } catch (error) {
+                    console.error('خطا در تایید:', error);
+                    alert('خطا در تایید کد');
+                }
+            },
+
+            bindEvents() {
+                document.getElementById('sendCodeBtn').onclick = () => this.sendVerificationCode();
+                document.getElementById('verifyBtn').onclick = () => this.verifyCode();
+            },
+
+            async checkExistingSession() {
+                const savedEmail = localStorage.getItem('userEmail');
+                if (savedEmail) {
+                    const user = await db.users.where('email').equals(savedEmail).first();
+                    if (user && user.verified) {
+                        currentUser = user;
+                        this.showMainContent();
+                    }
+                }
+            },
+              showMainContent() {
+                  document.getElementById('authContainer').style.display = 'none';
+                  window.location.href = 'rooms-list.html';
+              }
+        };
+          // 7. راه‌اندازی اولیه
+          document.addEventListener('DOMContentLoaded', () => {
+              console.log('DOM fully loaded, initializing application');
+    
+              // کد جدید را اینجا اضافه کنید
+              document.getElementById('startButton').onclick = () => {
+                  console.log('Start button clicked - Initializing application');
+                  document.getElementById('welcomeScreen').style.display = 'none';
+                  console.log('Welcome screen hidden');
+
+                  if (localStorage.getItem('userEmail')) {
+                      console.log('Found existing user session');
+                      console.log('User email:', localStorage.getItem('userEmail'));
+                      Auth.checkExistingSession();
+                  } else {
+                      console.log('No existing session found - showing auth container');
+                      document.getElementById('authContainer').style.display = 'flex';
+                  }
+                  console.log('Application initialization completed');
+              };
+
+              Auth.init();
+              RoomManager.init();
+              console.log('Room manager initialized');
+              console.log('Application initialized');
+              window.addEventListener('error', (event) => {
+                  console.log('Error:', event.error);
+              });
+        });    </script>
+</body>
+</html>
+
+<!-- اضافه کردن قبل از div#authContainer -->
+<div id="welcomeScreen" class="welcome-container">
+    <div class="welcome-content">
+        <h1>به برنامه Globgram خوش آمدید</h1>
+        <p>با این برنامه می‌توانید به راحتی با دوستان خود ارتباط صوتی برقرار کنید</p>
+        <div class="features">
+            <div class="feature-item">
+                <span class="icon">🎤</span>
+                <p>ضبط و ارسال پیام صوتی</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🔒</span>
+                <p>اتاق‌های خصوصی و امن</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🌐</span>
+                <p>ارتباط آنلاین و سریع</p>
+            </div>
+            <div class="feature-item">
+                <span class="icon">🛡️</span>
+                <p>غیر قابل فیلتر شدن</p>
+            </div>
+        </div>
+        <button id="startButton" class="welcome-button">شروع برنامه</button>
+    </div></div>
+
+<div id="profileSection" class="profile-container" style="display: none;">
+    <div class="profile-content">
+        <div class="profile-header">
+            <div class="profile-icon">👤</div>
+            <h2 id="profileName">نام کاربر</h2>
+            <p id="profileEmail">ایمیل کاربر</p>
+        </div>
+        
+        <div class="settings-container">
+            <!-- بخش اطلاعات کاربر -->
+            <div class="settings-section user-section">
+            </div>
+
+            <!-- تنظیمات اصلی -->
+            <div class="settings-section">
+                <div class="settings-item" id="accountSettings">
+                    <span class="settings-icon">🔐</span>
+                    <span class="settings-text">تنظیمات حساب کاربری</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+        
+                <div class="settings-item" id="chatSettings">
+                    <span class="settings-icon">💬</span>
+                    <span class="settings-text">تنظیمات چت و پیام‌ها</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+
+                <div class="settings-item" id="privacySettings">
+                    <span class="settings-icon">🔒</span>
+                    <span class="settings-text">حریم خصوصی</span>
+                    <span class="settings-arrow">›</span>
+                </div>
+            </div>
+              <!-- محتوای فعلی -->
+              <div class="settings-section">
+                  <button id="backToMainChat" class="primary-button back-to-chat">
+                      بازگشت به صفحه چت
+                  </button>
+              </div>
+              <div class="settings-section">
+                  <div class="settings-item" id="logoutButton">
+                      <span class="settings-icon">🚪</span>
+                      <span class="settings-text">خروج از حساب کاربری</span>
+                      <span class="settings-arrow">›</span>
+                  </div>
+              </div>
+          </div>
+
+<!-- اضافه کردن بعد از settings-container -->
+<div class="settings-panels">
+    <!-- پنل تنظیمات حساب کاربری -->
+    <div id="accountSettingsPanel" class="settings-panel">
+        <div class="panel-content">
+            <div class="profile-avatar-section">
+                <img id="profileAvatar" alt="تصویر پروفایل">
+                <button id="changeAvatarBtn" class="avatar-upload-btn">تغییر تصویر</button>
+            </div>
+            <div class="setting-option">
+                <label>نام کاربری</label>
+                <input type="text" id="userNameInput" class="settings-input" placeholder="نام کاربری خود را وارد کنید">
+                <button id="saveUserNameBtn" class="save-settings">ذخیره نام کاربری</button>
+                <button id="backToProfile" class="secondary-button">بازگشت</button>
+            </div>
+        </div>
+    </div>
+</div>
+    <!-- پنل تنظیمات چت -->    <div id="chatSettingsPanel" class="settings-panel">
+        <div class="panel-header">
+            <button class="back-button">⮜</button>
+            <h3>تنظیمات چت و پیام‌ها</h3>
+        </div>
+        <div class="panel-content">
+            <div class="setting-option">
+                <label>پس‌زمینه چت</label>
+                <select id="chatBackgroundSelect">
+                    <option value="light">روشن</option>
+                    <option value="dark">تیره</option>
+                </select>
+            </div>
+            <div class="setting-option">
+                <label>کیفیت صدا</label>
+                <select id="audioQualitySelect">
+                    <option value="high">بالا</option>
+                    <option value="medium">متوسط</option>
+                    <option value="low">پایین</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- پنل تنظیمات حریم خصوصی -->
+    <div id="privacySettingsPanel" class="settings-panel">
+        <div class="panel-header">
+            <button class="back-button">⮜</button>
+            <h3>تنظیمات حریم خصوصی</h3>
+        </div>
+        <div class="panel-content">
+            <div class="setting-option">
+                <label>نمایش وضعیت آنلاین</label>
+                <select id="onlineStatusSelect">
+                    <option value="everyone">همه</option>
+                    <option value="contacts">مخاطبین</option>
+                    <option value="nobody">هیچکس</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
